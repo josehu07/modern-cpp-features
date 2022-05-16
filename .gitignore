@@ -1,0 +1,6 @@
+*.o
+*.so
+
+runnable/cpp*
+!runnable/cpp*.cpp
+

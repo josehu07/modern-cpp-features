@@ -15,3 +15,8 @@ $(BINS): cpp%: cpp%.cpp
 .PHONY: clean
 clean:
 	rm -f $(BINS)
+
+
+.PHONY: run-all
+run-all:
+	@for bin in $(BINS); do ./$$bin; done

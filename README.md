@@ -1,6 +1,6 @@
 This is Guanzhou's fork of `modern-cpp-features`.
 
-* Added runnable examples under `runnable/` to show how the features behave in action
+* Added runnable examples under `runnable/` to show how the features behave in action:
   ```bash
   cd runnable
   make clean && make

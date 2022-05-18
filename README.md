@@ -1,6 +1,6 @@
 This is Guanzhou's fork of `modern-cpp-features`.
 
-* Added runnable examples under `runnable/` to show how the features behave in action; building them requires GNU g++ of [sufficiently up-to-date version](https://gcc.gnu.org/projects/cxx-status.html) that covers C++20 standard support:
+* Added runnable examples under `runnable/` to show how the features behave in action; building them requires GNU `g++` of [sufficiently up-to-date version](https://gcc.gnu.org/projects/cxx-status.html) that covers C++20 standard support:
   ```bash
   cd runnable
   make clean && make

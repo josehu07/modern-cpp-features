@@ -1,7 +1,12 @@
 This is Guanzhou's fork of `modern-cpp-features`.
 
-* TODO runnables, build requirements
-* TODO github workflow
+* Added runnable examples under `runnable/` to show how the features behave in action
+  ```bash
+  cd runnable
+  make clean && make
+  make run-all
+  ```
+* Always refer to [cppreference.com](https://en.cppreference.com/w/) for accurate documentation & exmaples
 
 
 # C++20/17/14/11 Language & Library Features

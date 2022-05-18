@@ -29,7 +29,7 @@ public:
     AssertionFailure(const std::string file, int line)
             : file(file), line(line) {
         std::stringstream ss;
-        ss << "assertion failed @ " << file << ":" << line;
+        ss << "condition assertion failed @ " << file << ":" << line;
         message = ss.str();
     }
     ~AssertionFailure() {}
@@ -39,13 +39,12 @@ public:
     }
 };
 
-void assert_or_raise(const std::string file, int line, bool condition) {
-    if (!condition) {
-        throw AssertionFailure(file, line);
-    }
-}
-
-#define ASSERT(cond)    assert_or_raise(__FILE__, __LINE__, (cond))
+#define ASSERT(cond)                                    \
+    do {                                                \
+        if (!(cond)) {                                  \
+            throw AssertionFailure(__FILE__, __LINE__); \
+        }                                               \
+    } while (0)
 #define ASSERT_EQ(a, b) ASSERT((a) == (b))
 #define ASSERT_NE(a, b) ASSERT((a) != (b))
 
@@ -54,7 +53,38 @@ void assert_or_raise(const std::string file, int line, bool condition) {
 // Exception raising support //
 ///////////////////////////////
 
-// TODO
+class ThrowingFailure : public std::exception {
+private:
+    const std::string file;
+    const int line;
+    std::string message;
+
+public:
+    ThrowingFailure(const std::string file, int line)
+            : file(file), line(line) {
+        std::stringstream ss;
+        ss << "no exception thrown as expected @ " << file << ":" << line;
+        message = ss.str();
+    }
+    ~ThrowingFailure() {}
+
+    const char *what() const noexcept override {
+        return message.c_str();
+    }
+};
+
+#define EXPECT_THROW(func)                             \
+    do {                                               \
+        bool thrown = false;                           \
+        try {                                          \
+            func();                                    \
+        } catch (...) {                                \
+            thrown = true;                             \
+        }                                              \
+        if (!thrown) {                                 \
+            throw ThrowingFailure(__FILE__, __LINE__); \
+        }                                              \
+    } while (0)
 
 
 ///////////////////////
@@ -67,6 +97,9 @@ void assert_or_raise(const std::string file, int line, bool condition) {
         func();                                             \
         std::cout << "OK" << std::endl;                     \
     } catch (const AssertionFailure& e) {                   \
+        std::cout << "FAILED" << std::endl                  \
+                  << "    " << e.what() << std::endl;       \
+    } catch (const ThrowingFailure& e) {                    \
         std::cout << "FAILED" << std::endl                  \
                   << "    " << e.what() << std::endl;       \
     } catch (...) {                                         \

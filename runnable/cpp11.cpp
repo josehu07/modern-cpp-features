@@ -1,7 +1,18 @@
 #include <iostream>
 #include <vector>
+#include <array>
+#include <unordered_set>
+#include <unordered_map>
 #include <memory>
 #include <exception>
+#include <thread>
+#include <mutex>
+#include <chrono>
+#include <type_traits>
+#include <typeinfo>
+#include <algorithm>
+#include <numeric>
+#include <future>
 #include <cmath>
 #include "utils.hpp"
 
@@ -411,12 +422,429 @@ void test_explicit_override() {
 }
 
 struct ObjF final : ObjE {      // ObjF cannot be derived from any further
-    std::string foo() { return "further-derived"; }
+    std::string foo() override { return "further-derived"; }
 };
 
 void test_final_specifier() {
     ObjF f;
     ASSERT_EQ(f.foo(), "further-derived");
+}
+
+
+///////////////////////
+// default & deleted //
+///////////////////////
+
+struct ObjG {
+    int x = 0;
+    ObjG() : x(1) {}
+};
+
+struct ObjH : ObjG {
+    ObjH() = default;   // uses ObjG::ObjG
+    ObjH(const ObjH&) = delete;
+    ObjH& operator=(const ObjH&) = delete;
+};
+
+void test_default_specifier() {
+    ObjH h;
+    ASSERT_EQ(h.x, 1);
+}
+
+void test_delete_specifier() {
+    ObjH h0;
+    ASSERT_EQ(h0.x, 1);
+    // cannot do `ObjH h1 = h0` -- copy constructor deleted
+    // cannot do `h1 = h0` -- assignment operator= deleted
+}
+
+
+///////////////////////////
+// Range-based for loops //
+///////////////////////////
+
+void test_range_based_for() {
+    std::array<int, 5> a{1, 2, 3, 4, 5};
+    for (auto x : a)
+        x *= 2;
+    ASSERT_EQ(a, (std::array<int, 5>{1, 2, 3, 4, 5}));
+    for (auto& x : a)
+        x *= 2;
+    ASSERT_EQ(a, (std::array<int, 5>{2, 4, 6, 8, 10}));
+}
+
+
+////////////////////////////
+// Converting constructor //
+////////////////////////////
+
+struct ObjI {
+    int c = 0;
+    ObjI() = default;
+    ObjI(int, int) { c = 2; }
+    ObjI(int, int, int) { c = 3; }
+};
+
+struct ObjJ : ObjI {
+    bool list_version_called = false;
+    ObjJ(int a, int b) : ObjI(a, b) {}
+    ObjJ(int a, int b, int c) : ObjI(a, b, c) {}
+    ObjJ(std::initializer_list<int>) { list_version_called = true; }
+};
+
+void test_converting_ctors() {
+    ObjI i0{1, 2};      // curly braced syntax converted into constructor args
+    ASSERT_EQ(i0.c, 2);
+    ObjI i1 = {1, 2, 3};
+    ASSERT_EQ(i1.c, 3);
+    ObjJ j{4, 5, 6};    // has one that accepts initializer_list, calls that instead
+    ASSERT(j.list_version_called);
+}
+
+
+//////////////////////////////
+// Member initializer sugar //
+//////////////////////////////
+
+class Person {
+private:
+    unsigned age {7};   // avoids writing a ctor only for doing such default initialization
+public:
+    unsigned get_age() const { return age; }
+};
+
+void test_member_initializer() {
+    Person p;
+    ASSERT_EQ(p.get_age(), 7);
+}
+
+
+////////////////////////////////////
+// Ref-qualified member functions //
+////////////////////////////////////
+
+struct ObjK {
+    std::vector<int> get_bar(std::string& s) & { s = "lr"; return bar; }
+    std::vector<int> get_bar(std::string& s) const& { s = "clr"; return bar; }
+    std::vector<int> get_bar(std::string& s) && { s = "rr"; return std::move(bar); }
+    std::vector<int> get_bar(std::string& s) const&& { s = "crr"; return std::move(bar); }
+private:
+    std::vector<int> bar;
+};
+
+void test_ref_qualified_methods() {
+    std::string s0, s1, s2, s3, s4;
+    ObjK foo0;
+    auto bar0 = foo0.get_bar(s0);   // calls `get_bar() &`
+    const ObjK foo1;
+    auto bar1 = foo1.get_bar(s1);   // calls `get_bar() const&`
+    ObjK{}.get_bar(s2);             // calls `get_bar() &&`
+    std::move(foo0).get_bar(s3);    // calls `get_bar() &&`
+    std::move(foo1).get_bar(s4);    // calls `get_bar() const&&`
+    ASSERT_EQ(s0, "lr");
+    ASSERT_EQ(s1, "clr");
+    ASSERT_EQ(s2, "rr");
+    ASSERT_EQ(s3, "rr");
+    ASSERT_EQ(s4, "crr");
+}
+
+
+////////////////////////
+// noexcept specifier //
+////////////////////////
+
+void may_throw_something() {
+    throw std::runtime_error("something");
+}
+
+void declared_nonthrowing() noexcept {
+    may_throw_something();      // allowed, even if it throws
+    // calling `throw ..` here is valid, but effectively triggers std::terminate
+}
+
+void test_noexcept_specifier() {
+    EXPECT_THROW(may_throw_something);
+}
+
+
+/////////////////////////
+// Raw string literals //
+/////////////////////////
+
+void test_raw_string_literal() {
+    const std::string msg1 = "\n    Hello,\n        \"world\"!\n    ";
+    const std::string msg2 = R"deli(
+    Hello,
+        "world"!
+    )deli";     // anything enclosed within parentheses are preserved
+    ASSERT_EQ(msg1, msg2);
+}
+
+
+/////////////////
+// std::thread //
+/////////////////
+
+static int counter = 0;
+static std::mutex counter_mutex;
+
+static void thread_func(int arg1, int arg2) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    std::lock_guard<std::mutex> g(counter_mutex);
+    counter++;
+}
+
+void test_std_thread() {
+    std::vector<std::thread> threads;
+    // could give a lambda function
+    threads.emplace_back([]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        std::lock_guard<std::mutex> g(counter_mutex);
+        counter++;
+    });
+    // could give a standard function
+    threads.emplace_back(thread_func, 1, 2);
+    for (auto& t : threads)
+        t.join();
+    ASSERT_EQ(counter, 2);
+}
+
+
+////////////////////
+// std::to_string //
+////////////////////
+
+void test_std_to_string() {
+    ASSERT_EQ(std::to_string(123u), "123");
+    ASSERT_EQ(std::to_string(1.2f), "1.200000");    // assumes 6 significant digits
+}
+
+
+////////////////////////
+// Type traits & info //
+////////////////////////
+
+static_assert(std::is_integral<int>::value);    // usable at compile-time
+static_assert(std::is_same<std::conditional<true, int, double>::type, int>::value);
+
+void test_type_traits_info() {
+    typedef std::conditional<(sizeof(int) > sizeof(double)), int, double>::type MyNumT;
+    ASSERT_NE(typeid(MyNumT).name(), std::string("int"));
+              // this will be a string literal generated at compile-time,
+              // and is compiler-dependent -- gcc may yield "d" for double
+}
+
+
+////////////////////
+// Smart pointers //
+////////////////////
+
+struct ObjL {
+    int x = -1;
+};
+
+void test_unique_ptr() {
+    {
+        std::unique_ptr<ObjL> p0(new ObjL());   // using constructor is not recommended;
+                                                // with C++14 onward, use std::make_unique
+        // p0 owns this heap object at this point
+        p0->x = 0;
+        ASSERT_EQ(p0->x, 0);
+    }   // when p0 goes out of scope, object is destructed (freed)
+    {
+        std::unique_ptr<ObjL> p1(new ObjL());
+        p1->x = 1;
+        {
+            std::unique_ptr<ObjL> p2(std::move(p1));
+            // move semantics, now p1 owns this object, p0 no longer safe to dereference
+            // std::unique_ptr is not copyable
+            p2->x = 2;
+            ASSERT_EQ(p2->x, 2);
+            p1 = std::move(p2);     // move back to p1
+        }
+        p1->x = 3;
+        ASSERT_EQ(p1->x, 3);
+    }
+}
+
+void test_shared_ptr() {
+    // essentially a reference counted pointer that automatically destroys the heap object it
+    // holds when the last pointer goes out of scope, calls reset(), or assigned another object;
+    // std::shared_ptr does not guarantee mutual exclusion on the object it holds when there's
+    // multi-threading -- proper synchronization is still required!
+    {
+        std::shared_ptr<ObjL> pn(new ObjL());   // using constructor is not recommended
+    }
+    {
+        auto p0 = std::make_shared<ObjL>();     // std::make_shared is recommended, see doc
+        p0->x = 0;
+        ASSERT_EQ(p0->x, 0);
+        {
+            std::shared_ptr<ObjL> p1 = p0;
+            std::shared_ptr<ObjL> p2 = p0;
+            p1->x = 1;
+            p2->x = 2;
+            ASSERT_EQ(p1->x, 2);
+            ASSERT_EQ(p0->x, 2);
+        }
+        p0->x = 3;
+        ASSERT_EQ(p0->x, 3);
+    }   // all references go out-of-scope here -- object destructed       
+}
+
+
+/////////////////
+// std::chrono //
+/////////////////
+
+void test_std_chrono() {
+    std::chrono::time_point<std::chrono::steady_clock> tps, tpe;
+    tps = std::chrono::steady_clock::now();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    tpe = std::chrono::steady_clock::now();
+    std::chrono::duration<double, std::milli> elapsed_ms = tpe - tps;
+    ASSERT(elapsed_ms.count() >= 30);
+}
+
+
+///////////////////////
+// Tuples & std::tie //
+///////////////////////
+
+void test_tuples_std_tie() {
+    auto profile = std::make_tuple(24, "Jose", 179.5);
+         // has type std::tuple<int, const char *, double>
+    // use std::get to get element at index
+    ASSERT_EQ(std::get<0>(profile), 24);
+    ASSERT_EQ(std::get<1>(profile), std::string("Jose"));
+    ASSERT_EQ(std::get<2>(profile), 179.5);
+    // use std::tie to bound a tuple of lvalue references (for unpacking)
+    std::string name;
+    double height;
+    std::tie(std::ignore, name, height) = profile;
+    ASSERT_EQ(name, std::string("Jose"));
+    ASSERT_EQ(height, 179.5);
+}
+
+
+//////////////////////////////////
+// Array & unordered containers //
+//////////////////////////////////
+
+void test_std_array() {
+    std::array<int, 3> a = {2, 1, 3};
+    std::sort(a.begin(), a.end());
+    ASSERT_EQ(a, (std::array<int, 3>{1, 2, 3}));
+    ASSERT_EQ(a[1], 2);
+    for (int& x : a)
+        x *= 2;
+    ASSERT_EQ(a, (std::array<int, 3>{2, 4, 6}));
+}
+
+void test_unordered_containers() {
+    // unordered_set
+    std::unordered_set<int> s;
+    s.insert(7);
+    s.insert(9);
+    int x = s.count(7);
+    ASSERT_EQ(x, 1);
+    // unordered_map
+    std::unordered_map<int, std::string> m;
+    m[4] = "nice";
+    std::string y = m.at(4);
+    ASSERT_EQ(y, "nice");
+    // see unordered_multiset, _multimap, and all useful methods in doc
+}
+
+
+//////////////
+// std::ref //
+//////////////
+
+void test_std_ref() {
+    auto val = 99;
+    auto _ref = std::ref(val);
+    _ref++;
+    auto _cref = std::cref(val);
+    ASSERT_EQ(_cref.get(), 100);
+    // can be used to make a vector of "references" (actually references wrappers)
+    std::vector<std::reference_wrapper<int>> vec;
+    vec.push_back(_ref);
+    vec[0].get() = 77;
+    ASSERT_EQ(val, 77);
+}
+
+
+///////////////////////////
+// std::begin & std::end //
+///////////////////////////
+
+template <typename T>
+int count_twos(const T& container) {
+    return std::count_if(std::begin(container), std::end(container),
+                         [](int e) { return e == 2; });
+}
+
+void test_std_begin_end() {
+    std::vector<int> vec{1, 2, 2, 2, 3, 4, 5};
+    int arr[7] = {8, 7, 7, 5, 3, 2, 1};
+    auto vec_2s = count_twos(vec);
+    auto arr_2s = count_twos(arr);      // std::begin/end also works with raw arrays
+    ASSERT_EQ(vec_2s, 3);
+    ASSERT_EQ(arr_2s, 1);
+}
+
+
+//////////////////////////////
+// Async, future, & promise //
+//////////////////////////////
+
+static int return_a_thousand() {
+    // maybe some time-consuming work here...
+    return 1000;
+}
+
+void test_std_async_future() {
+    auto handle0 = std::async(std::launch::async, return_a_thousand);
+                              // do work on a new thread
+    auto handle1 = std::async(std::launch::deferred, return_a_thousand);
+                              // laze evaluation on current thread (evaluate when trying to get)
+    auto handle2 = std::async(std::launch::deferred | std::launch::async, return_a_thousand);
+                              // up to implementation to decide
+    ASSERT_EQ(handle0.get(), 1000);
+    ASSERT_EQ(handle1.get(), 1000);
+    ASSERT_EQ(handle2.get(), 1000);
+}
+
+static void accumulate_func(std::vector<int>::const_iterator begin,
+                            std::vector<int>::const_iterator end,
+                            std::promise<int> accumulate_promise) {
+    int sum = std::accumulate(begin, end, 0);
+    accumulate_promise.set_value(sum);      // notifies future
+}
+
+static void barrier_demo(std::promise<void> barrier_promise) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    barrier_promise.set_value();    // notifies future
+}
+
+void test_std_promise() {
+    // promise is a lower-level implementation and can be used explicitly when your task (that
+    // makes the result of future ready) is too complicated and thus cannot fit to be passed
+    // in std::async
+    // an std::promise assumes only one owner at any time, so need to std::move
+    std::vector<int> vec{1, 2, 3, 4, 5};
+    std::promise<int> accumulate_promise;
+    std::future<int> accumulate_future = accumulate_promise.get_future();
+    std::thread t0(accumulate_func, vec.begin(), vec.end(), std::move(accumulate_promise));
+    ASSERT_EQ(accumulate_future.get(), 15);
+    t0.join();
+    // a special "void" promise is useful as a handy barrier
+    std::promise<void> barrier_promise;
+    std::future<void> barrier_future = barrier_promise.get_future();
+    std::thread t1(barrier_demo, std::move(barrier_promise));
+    barrier_future.wait();
+    t1.join();
 }
 
 
@@ -444,6 +872,27 @@ int main(int argc, char *argv[]) {
     RUN_EXAMPLE(test_user_defined_literals);
     RUN_EXAMPLE(test_explicit_override);
     RUN_EXAMPLE(test_final_specifier);
+    RUN_EXAMPLE(test_default_specifier);
+    RUN_EXAMPLE(test_delete_specifier);
+    RUN_EXAMPLE(test_range_based_for);
+    RUN_EXAMPLE(test_converting_ctors);
+    RUN_EXAMPLE(test_member_initializer);
+    RUN_EXAMPLE(test_ref_qualified_methods);
+    RUN_EXAMPLE(test_noexcept_specifier);
+    RUN_EXAMPLE(test_raw_string_literal);
+    RUN_EXAMPLE(test_std_thread);
+    RUN_EXAMPLE(test_std_to_string);
+    RUN_EXAMPLE(test_type_traits_info);
+    RUN_EXAMPLE(test_unique_ptr);
+    RUN_EXAMPLE(test_shared_ptr);
+    RUN_EXAMPLE(test_std_chrono);
+    RUN_EXAMPLE(test_tuples_std_tie);
+    RUN_EXAMPLE(test_std_array);
+    RUN_EXAMPLE(test_unordered_containers);
+    RUN_EXAMPLE(test_std_ref);
+    RUN_EXAMPLE(test_std_begin_end);
+    RUN_EXAMPLE(test_std_async_future);
+    RUN_EXAMPLE(test_std_promise);
 
     return 0;
 }

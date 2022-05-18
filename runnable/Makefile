@@ -9,7 +9,7 @@ BINS=$(patsubst %,cpp%,$(STDS))
 all: $(BINS)
 
 $(BINS): cpp%: cpp%.cpp
-	$(CC) $(CXXFLAGS) -std=c++$* $< -o $@
+	$(CC) $(CXXFLAGS) -std=c++$* $< -o $@ -lpthread
 
 
 .PHONY: clean

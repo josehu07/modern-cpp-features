@@ -1,15 +1,18 @@
-CC=g++
-CXXFLAGS=-Wall -Werror -O3 -DNDEBUG
+CC:=g++
+CXXFLAGS:=-Wall -Werror -O3 -DNDEBUG
 
-STDS=11 14 17 20
-BINS=$(patsubst %,cpp%,$(STDS))
+BINS:=cpp11 cpp14 cpp17 cpp20
 
 
 .PHONY: all
 all: $(BINS)
 
-$(BINS): cpp%: cpp%.cpp
+
+cpp11 cpp14 cpp17: cpp%: cpp%.cpp
 	$(CC) $(CXXFLAGS) -std=c++$* $< -o $@ -lpthread
+
+cpp20: cpp%: cpp%.cpp
+	$(CC) $(CXXFLAGS) -fcoroutines -std=c++$* $< -o $@ -lpthread
 
 
 .PHONY: clean

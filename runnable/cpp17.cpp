@@ -28,7 +28,7 @@ bool logical_and(Args... args) {
     return (true && ... && args);
 }
 
-void test_folding_expressions() {
+void test_folding_exprs() {
     // folding expressions avoid writing tedious (and badly-readable) recursive definitions
     // for variadic template functions
     bool b0 = true;
@@ -385,7 +385,7 @@ void test_parallel_algos() {
 int main(int argc, char *argv[]) {
     std::cout << "C++17 features runnable tests:" << std::endl;
 
-    RUN_EXAMPLE(test_folding_expressions);
+    RUN_EXAMPLE(test_folding_exprs);
     RUN_EXAMPLE(test_constexpr_lambdas);
     RUN_EXAMPLE(test_inline_variables);
     RUN_EXAMPLE(test_nested_namespaces);

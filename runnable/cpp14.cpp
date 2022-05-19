@@ -228,7 +228,7 @@ void test_std_make_unique() {
 
 
 int main(int argc, char *argv[]) {
-    std::cout << "C++11 features runnable tests:" << std::endl;
+    std::cout << "C++14 features runnable tests:" << std::endl;
 
     RUN_EXAMPLE(test_binary_literals);
     RUN_EXAMPLE(test_generic_lambda);

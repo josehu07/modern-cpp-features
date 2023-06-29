@@ -9,7 +9,7 @@ C++20 includes the following new language features:
 - [designated initializers](#designated-initializers)
 - [template syntax for lambdas](#template-syntax-for-lambdas)
 - [range-based for loop with initializer](#range-based-for-loop-with-initializer)
-- [likely and unlikely attributes](#likely-and-unlikely-attributes)
+- [\[\[likely\]\] and \[\[unlikely\]\] attributes](#likely-and-unlikely-attributes)
 - [deprecate implicit capture of this](#deprecate-implicit-capture-of-this)
 - [class types in non-type template parameters](#class-types-in-non-type-template-parameters)
 - [constexpr virtual functions](#constexpr-virtual-functions)
@@ -18,6 +18,7 @@ C++20 includes the following new language features:
 - [using enum](#using-enum)
 - [lambda capture of parameter pack](#lambda-capture-of-parameter-pack)
 - [char8_t](#char8_t)
+- [constinit](#constinit)
 
 C++20 includes the following new library features:
 - [concepts library](#concepts-library)
@@ -220,9 +221,9 @@ g(baz{}); // PASS.
 ```c++
 template <typename T>
 concept C = requires(T x) {
-  {*x} -> typename T::inner; // the type of the expression `*x` is convertible to `T::inner`
+  {*x} -> std::convertible_to<typename T::inner>; // the type of the expression `*x` is convertible to `T::inner`
   {x + 1} -> std::same_as<int>; // the expression `x + 1` satisfies `std::same_as<decltype((x + 1))>`
-  {x * 1} -> T; // the type of the expression `x * 1` is convertible to `T`
+  {x * 1} -> std::convertible_to<T>; // the type of the expression `x * 1` is convertible to `T`
 };
 ```
 * **Nested requirements** - denoted by the `requires` keyword, specify additional constraints (such as those on local parameter arguments).
@@ -264,7 +265,7 @@ for (auto v = std::vector{1, 2, 3}; auto& e : v) {
 // prints "123"
 ```
 
-### likely and unlikely attributes
+### \[\[likely\]\] and \[\[unlikely\]\] attributes
 Provides a hint to the optimizer that the labelled statement has a high probability of being executed.
 ```c++
 switch (n) {
@@ -435,6 +436,16 @@ Provides a standard type for representing UTF-8 strings.
 char8_t utf8_str[] = u8"\u0123";
 ```
 
+### constinit
+The `constinit` specifier requires that a variable must be initialized at compile-time.
+```c++
+const char* g() { return "dynamic initialization"; }
+constexpr const char* f(bool p) { return p ? "constant initializer" : g(); }
+
+constinit const char* c = f(true); // OK
+constinit const char* d = f(false); // ERROR: `g` is not constexpr, so `d` cannot be evaluated at compile-time.
+```
+
 ## C++20 Library Features
 
 ### Concepts library
@@ -471,40 +482,48 @@ std::osyncstream{std::cout} << "The value of x is:" << x << std::endl;
 ```
 
 ### std::span
-A span is a view (i.e. non-owning) of a container providing bounds-checked access to a contiguous group of elements. Since views do not own their elements they are cheap to construct and copy -- a simplified way to think about views is they are holding references to their data. Spans can be dynamically-sized or fixed-sized.
+A span is a view (i.e. non-owning) of a container providing bounds-checked access to a contiguous group of elements. Since views do not own their elements they are cheap to construct and copy -- a simplified way to think about views is they are holding references to their data. As opposed to maintaining a pointer/iterator and length field, a span wraps both of those up in a single object.
+
+Spans can be dynamically-sized or fixed-sized (known as their *extent*). Fixed-sized spans benefit from bounds-checking.
+
+Span doesn't propogate const so to construct a read-only span use `std::span<const T>`.
+
+Example: using a dynamically-sized span to print integers from various containers.
 ```c++
-void f(std::span<int> ints) {
-    std::for_each(ints.begin(), ints.end(), [](auto i) {
-        // ...
-    });
+void print_ints(std::span<const int> ints) {
+    for (const auto n : ints) {
+        std::cout << n << std::endl;
+    }
 }
 
-std::vector<int> v = {1, 2, 3};
-f(v);
-std::array<int, 3> a = {1, 2, 3};
-f(a);
+print_ints(std::vector{ 1, 2, 3 });
+print_ints(std::array<int, 5>{ 1, 2, 3, 4, 5 });
+
+int a[10] = { 0 };
+print_ints(a);
 // etc.
 ```
-Example: as opposed to maintaining a pointer and length field, a span wraps both of those up in a single container.
+
+Example: a statically-sized span will fail to compile for containers that don't match the extent of the span.
 ```c++
-constexpr size_t LENGTH_ELEMENTS = 3;
-int* arr = new int[LENGTH_ELEMENTS]; // arr = {0, 0, 0}
+void print_three_ints(std::span<const int, 3> ints) {
+    for (const auto n : ints) {
+        std::cout << n << std::endl;
+    }
+}
 
-// Fixed-sized span which provides a view of `arr`.
-std::span<int, LENGTH_ELEMENTS> span = arr;
-span[1] = 1; // arr = {0, 1, 0}
+print_three_ints(std::vector{ 1, 2, 3 }); // ERROR
+print_three_ints(std::array<int, 5>{ 1, 2, 3, 4, 5 }); // ERROR
+int a[10] = { 0 };
+print_three_ints(a); // ERROR
 
-// Dynamic-sized span which provides a view of `arr`.
-std::span<int> d_span = arr;
-span[0] = 1; // arr = {1, 1, 0}
-```
-```c++
-constexpr size_t LENGTH_ELEMENTS = 3;
-int* arr = new int[LENGTH_ELEMENTS];
+std::array<int, 3> b = { 1, 2, 3 };
+print_three_ints(b); // OK
 
-std::span<int, LENGTH_ELEMENTS> span = arr; // OK
-std::span<double, LENGTH_ELEMENTS> span2 = arr; // ERROR
-std::span<int, 1> span3 = arr; // ERROR
+// You can construct a span manually if required:
+std::vector c{ 1, 2, 3 };
+print_three_ints(std::span<const int, 3>{ c.data(), 3 }); // OK: set pointer and length field.
+print_three_ints(std::span<const int, 3>{ c.cbegin(), c.cend() }); // OK: use iterator pairs.
 ```
 
 ### Bit operations

@@ -13,14 +13,13 @@ This is Guanzhou's fork of `modern-cpp-features`.
 
 ## Overview
 
-
 C++20 includes the following new language features:
 - [coroutines](#coroutines)
 - [concepts](#concepts)
 - [designated initializers](#designated-initializers)
 - [template syntax for lambdas](#template-syntax-for-lambdas)
 - [range-based for loop with initializer](#range-based-for-loop-with-initializer)
-- [likely and unlikely attributes](#likely-and-unlikely-attributes)
+- [\[\[likely\]\] and \[\[unlikely\]\] attributes](#likely-and-unlikely-attributes)
 - [deprecate implicit capture of this](#deprecate-implicit-capture-of-this)
 - [class types in non-type template parameters](#class-types-in-non-type-template-parameters)
 - [constexpr virtual functions](#constexpr-virtual-functions)
@@ -29,6 +28,7 @@ C++20 includes the following new language features:
 - [using enum](#using-enum)
 - [lambda capture of parameter pack](#lambda-capture-of-parameter-pack)
 - [char8_t](#char8_t)
+- [constinit](#constinit)
 
 C++20 includes the following new library features:
 - [concepts library](#concepts-library)
@@ -44,7 +44,6 @@ C++20 includes the following new library features:
 - [std::midpoint](#stdmidpoint)
 - [std::to_array](#stdto_array)
 
-
 C++17 includes the following new language features:
 - [template argument deduction for class templates](#template-argument-deduction-for-class-templates)
 - [declaring non-type template parameters with auto](#declaring-non-type-template-parameters-with-auto)
@@ -59,8 +58,9 @@ C++17 includes the following new language features:
 - [constexpr if](#constexpr-if)
 - [utf-8 character literals](#utf-8-character-literals)
 - [direct-list-initialization of enums](#direct-list-initialization-of-enums)
-- [fallthrough, nodiscard, maybe_unused attributes](#fallthrough-nodiscard-maybe_unused-attributes)
+- [\[\[fallthrough\]\], \[\[nodiscard\]\], \[\[maybe_unused\]\] attributes](#fallthrough-nodiscard-maybe_unused-attributes)
 - [\_\_has\_include](#\_\_has\_include)
+- [class template argument deduction](#class-template-argument-deduction)
 
 C++17 includes the following new library features:
 - [std::variant](#stdvariant)
@@ -73,7 +73,13 @@ C++17 includes the following new library features:
 - [std::byte](#stdbyte)
 - [splicing for maps and sets](#splicing-for-maps-and-sets)
 - [parallel algorithms](#parallel-algorithms)
-
+- [std::sample](#stdsample)
+- [std::clamp](#stdclamp)
+- [std::reduce](#stdreduce)
+- [prefix sum algorithms](#prefix-sum-algorithms)
+- [gcd and lcm](#gcd-and-lcm)
+- [std::not_fn](#stdnot_fn)
+- [string conversion to/from numbers](#string-conversion-tofrom-numbers)
 
 C++14 includes the following new language features:
 - [binary literals](#binary-literals)
@@ -89,7 +95,6 @@ C++14 includes the following new library features:
 - [user-defined literals for standard library types](#user-defined-literals-for-standard-library-types)
 - [compile-time integer sequences](#compile-time-integer-sequences)
 - [std::make_unique](#stdmake_unique)
-
 
 C++11 includes the following new language features:
 - [move semantics](#move-semantics)
@@ -142,8 +147,6 @@ C++11 includes the following new library features:
 - [memory model](#memory-model)
 - [std::async](#stdasync)
 - [std::begin/end](#stdbeginend)
-
-
 
 ## C++20 Language Features
 
@@ -332,9 +335,9 @@ g(baz{}); // PASS.
 ```c++
 template <typename T>
 concept C = requires(T x) {
-  {*x} -> typename T::inner; // the type of the expression `*x` is convertible to `T::inner`
+  {*x} -> std::convertible_to<typename T::inner>; // the type of the expression `*x` is convertible to `T::inner`
   {x + 1} -> std::same_as<int>; // the expression `x + 1` satisfies `std::same_as<decltype((x + 1))>`
-  {x * 1} -> T; // the type of the expression `x * 1` is convertible to `T`
+  {x * 1} -> std::convertible_to<T>; // the type of the expression `x * 1` is convertible to `T`
 };
 ```
 * **Nested requirements** - denoted by the `requires` keyword, specify additional constraints (such as those on local parameter arguments).
@@ -376,7 +379,7 @@ for (auto v = std::vector{1, 2, 3}; auto& e : v) {
 // prints "123"
 ```
 
-### likely and unlikely attributes
+### \[\[likely\]\] and \[\[unlikely\]\] attributes
 Provides a hint to the optimizer that the labelled statement has a high probability of being executed.
 ```c++
 switch (n) {
@@ -547,6 +550,16 @@ Provides a standard type for representing UTF-8 strings.
 char8_t utf8_str[] = u8"\u0123";
 ```
 
+### constinit
+The `constinit` specifier requires that a variable must be initialized at compile-time.
+```c++
+const char* g() { return "dynamic initialization"; }
+constexpr const char* f(bool p) { return p ? "constant initializer" : g(); }
+
+constinit const char* c = f(true); // OK
+constinit const char* d = f(false); // ERROR: `g` is not constexpr, so `d` cannot be evaluated at compile-time.
+```
+
 ## C++20 Library Features
 
 ### Concepts library
@@ -583,40 +596,48 @@ std::osyncstream{std::cout} << "The value of x is:" << x << std::endl;
 ```
 
 ### std::span
-A span is a view (i.e. non-owning) of a container providing bounds-checked access to a contiguous group of elements. Since views do not own their elements they are cheap to construct and copy -- a simplified way to think about views is they are holding references to their data. Spans can be dynamically-sized or fixed-sized.
+A span is a view (i.e. non-owning) of a container providing bounds-checked access to a contiguous group of elements. Since views do not own their elements they are cheap to construct and copy -- a simplified way to think about views is they are holding references to their data. As opposed to maintaining a pointer/iterator and length field, a span wraps both of those up in a single object.
+
+Spans can be dynamically-sized or fixed-sized (known as their *extent*). Fixed-sized spans benefit from bounds-checking.
+
+Span doesn't propogate const so to construct a read-only span use `std::span<const T>`.
+
+Example: using a dynamically-sized span to print integers from various containers.
 ```c++
-void f(std::span<int> ints) {
-    std::for_each(ints.begin(), ints.end(), [](auto i) {
-        // ...
-    });
+void print_ints(std::span<const int> ints) {
+    for (const auto n : ints) {
+        std::cout << n << std::endl;
+    }
 }
 
-std::vector<int> v = {1, 2, 3};
-f(v);
-std::array<int, 3> a = {1, 2, 3};
-f(a);
+print_ints(std::vector{ 1, 2, 3 });
+print_ints(std::array<int, 5>{ 1, 2, 3, 4, 5 });
+
+int a[10] = { 0 };
+print_ints(a);
 // etc.
 ```
-Example: as opposed to maintaining a pointer and length field, a span wraps both of those up in a single container.
+
+Example: a statically-sized span will fail to compile for containers that don't match the extent of the span.
 ```c++
-constexpr size_t LENGTH_ELEMENTS = 3;
-int* arr = new int[LENGTH_ELEMENTS]; // arr = {0, 0, 0}
+void print_three_ints(std::span<const int, 3> ints) {
+    for (const auto n : ints) {
+        std::cout << n << std::endl;
+    }
+}
 
-// Fixed-sized span which provides a view of `arr`.
-std::span<int, LENGTH_ELEMENTS> span = arr;
-span[1] = 1; // arr = {0, 1, 0}
+print_three_ints(std::vector{ 1, 2, 3 }); // ERROR
+print_three_ints(std::array<int, 5>{ 1, 2, 3, 4, 5 }); // ERROR
+int a[10] = { 0 };
+print_three_ints(a); // ERROR
 
-// Dynamic-sized span which provides a view of `arr`.
-std::span<int> d_span = arr;
-span[0] = 1; // arr = {1, 1, 0}
-```
-```c++
-constexpr size_t LENGTH_ELEMENTS = 3;
-int* arr = new int[LENGTH_ELEMENTS];
+std::array<int, 3> b = { 1, 2, 3 };
+print_three_ints(b); // OK
 
-std::span<int, LENGTH_ELEMENTS> span = arr; // OK
-std::span<double, LENGTH_ELEMENTS> span2 = arr; // ERROR
-std::span<int, 1> span3 = arr; // ERROR
+// You can construct a span manually if required:
+std::vector c{ 1, 2, 3 };
+print_three_ints(std::span<const int, 3>{ c.data(), 3 }); // OK: set pointer and length field.
+print_three_ints(std::span<const int, 3>{ c.cbegin(), c.cend() }); // OK: use iterator pairs.
 ```
 
 ### Bit operations
@@ -926,16 +947,22 @@ byte d = byte{1}; // OK
 byte e = byte{256}; // ERROR
 ```
 
-### fallthrough, nodiscard, maybe_unused attributes
+### \[\[fallthrough\]\], \[\[nodiscard\]\], \[\[maybe_unused\]\] attributes
 C++17 introduces three new attributes: `[[fallthrough]]`, `[[nodiscard]]` and `[[maybe_unused]]`.
-* `[[fallthrough]]` indicates to the compiler that falling through in a switch statement is intended behavior.
+* `[[fallthrough]]` indicates to the compiler that falling through in a switch statement is intended behavior. This attribute may only be used in a switch statement, and must be placed before the next case/default label.
 ```c++
 switch (n) {
-  case 1: [[fallthrough]]
+  case 1: 
     // ...
+    [[fallthrough]];
   case 2:
     // ...
     break;
+  case 3:
+    // ...
+    [[fallthrough]];
+  default:
+    // ...
 }
 ```
 
@@ -1009,6 +1036,39 @@ It can also be used to include headers existing under different names or locatio
 #endif
 ```
 
+### Class template argument deduction
+*Class template argument deduction* (CTAD) allows the compiler to deduce template arguments from constructor arguments.
+```c++
+std::vector v{ 1, 2, 3 }; // deduces std::vector<int>
+
+std::mutex mtx;
+auto lck = std::lock_guard{ mtx }; // deduces to std::lock_guard<std::mutex>
+
+auto p = new std::pair{ 1.0, 2.0 }; // deduces to std::pair<double, double>
+```
+
+For user-defined types, *deduction guides* can be used to guide the compiler how to deduce template arguments if applicable:
+```c++
+template <typename T>
+struct container {
+  container(T t) {}
+
+  template <typename Iter>
+  container(Iter beg, Iter end);
+};
+
+// deduction guide
+template <template Iter>
+container(Iter b, Iter e) -> container<typename std::iterator_traits<Iter>::value_type>;
+
+container a{ 7 }; // OK: deduces container<int>
+
+std::vector<double> v{ 1.0, 2.0, 3.0 };
+auto b = container{ v.begin(), v.end() }; // OK: deduces container<double>
+
+container c{ 5, 6 }; // ERROR: std::iterator_traits<int>::value_type is not a type
+```
+
 ## C++17 Library Features
 
 ### std::variant
@@ -1071,23 +1131,24 @@ v; // == "trim me"
 ```
 
 ### std::invoke
-Invoke a `Callable` object with parameters. Examples of `Callable` objects are `std::function` or `std::bind` where an object can be called similarly to a regular function.
+Invoke a `Callable` object with parameters. Examples of *callable* objects are `std::function` or lambdas; objects that can be called similarly to a regular function.
 ```c++
 template <typename Callable>
 class Proxy {
-  Callable c;
+  Callable c_;
+
 public:
-  Proxy(Callable c): c(c) {}
-  template <class... Args>
+  Proxy(Callable c) : c_{ std::move(c) } {}
+
+  template <typename... Args>
   decltype(auto) operator()(Args&&... args) {
     // ...
-    return std::invoke(c, std::forward<Args>(args)...);
+    return std::invoke(c_, std::forward<Args>(args)...);
   }
 };
-auto add = [](int x, int y) {
-  return x + y;
-};
-Proxy<decltype(add)> p {add};
+
+const auto add = [](int x, int y) { return x + y; };
+Proxy p{ add };
 p(1, 2); // == 3
 ```
 
@@ -1176,6 +1237,128 @@ std::vector<int> longVector;
 auto result1 = std::find(std::execution::par, std::begin(longVector), std::end(longVector), 2);
 // Sort elements using sequential execution policy
 auto result2 = std::sort(std::execution::seq, std::begin(longVector), std::end(longVector));
+```
+
+### std::sample
+Samples n elements in the given sequence (without replacement) where every element has an equal chance of being selected.
+```c++
+const std::string ALLOWED_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+std::string guid;
+// Sample 5 characters from ALLOWED_CHARS.
+std::sample(ALLOWED_CHARS.begin(), ALLOWED_CHARS.end(), std::back_inserter(guid),
+  5, std::mt19937{ std::random_device{}() });
+
+std::cout << guid; // e.g. G1fW2
+```
+
+### std::clamp
+Clamp given value between a lower and upper bound.
+```c++
+std::clamp(42, -1, 1); // == 1
+std::clamp(-42, -1, 1); // == -1
+std::clamp(0, -1, 1); // == 0
+
+// `std::clamp` also accepts a custom comparator:
+std::clamp(0, -1, 1, std::less<>{}); // == 0
+```
+
+### std::reduce
+Fold over a given range of elements. Conceptually similar to `std::accumulate`, but `std::reduce` will perform the fold in parallel. Due to the fold being done in parallel, if you specify a binary operation, it is required to be associative and commutative. A given binary operation also should not change any element or invalidate any iterators within the given range.
+
+The default binary operation is std::plus with an initial value of 0.
+```c++
+const std::array<int, 3> a{ 1, 2, 3 };
+std::reduce(std::cbegin(a), std::cend(a)); // == 6
+// Using a custom binary op:
+std::reduce(std::cbegin(a), std::cend(a), 1, std::multiplies<>{}); // == 6
+```
+Additionally you can specify transformations for reducers:
+```c++
+std::transform_reduce(std::cbegin(a), std::cend(a), 0, std::plus<>{}, times_ten); // == 60
+
+const std::array<int, 3> b{ 1, 2, 3 };
+const auto product_times_ten = [](const auto a, const auto b) { return a * b * 10; };
+
+std::transform_reduce(std::cbegin(a), std::cend(a), std::cbegin(b), 0, std::plus<>{}, product_times_ten); // == 140
+```
+
+### Prefix sum algorithms
+Support for prefix sums (both inclusive and exclusive scans) along with transformations.
+```c++
+const std::array<int, 3> a{ 1, 2, 3 };
+
+std::inclusive_scan(std::cbegin(a), std::cend(a),
+    std::ostream_iterator<int>{ std::cout, " " }, std::plus<>{}); // 1 3 6
+
+std::exclusive_scan(std::cbegin(a), std::cend(a),
+    std::ostream_iterator<int>{ std::cout, " " }, 0, std::plus<>{}); // 0 1 3
+
+const auto times_ten = [](const auto n) { return n * 10; };
+
+std::transform_inclusive_scan(std::cbegin(a), std::cend(a),
+    std::ostream_iterator<int>{ std::cout, " " }, std::plus<>{}, times_ten); // 10 30 60
+
+std::transform_exclusive_scan(std::cbegin(a), std::cend(a),
+    std::ostream_iterator<int>{ std::cout, " " }, 0, std::plus<>{}, times_ten); // 0 10 30
+```
+
+### GCD and LCM
+Greatest common divisor (GCD) and least common multiple (LCM).
+```c++
+const int p = 9;
+const int q = 3;
+std::gcd(p, q); // == 3
+std::lcm(p, q); // == 9
+```
+
+### std::not_fn
+Utility function that returns the negation of the result of the given function.
+```c++
+const std::ostream_iterator<int> ostream_it{ std::cout, " " };
+const auto is_even = [](const auto n) { return n % 2 == 0; };
+std::vector<int> v{ 0, 1, 2, 3, 4 };
+
+// Print all even numbers.
+std::copy_if(std::cbegin(v), std::cend(v), ostream_it, is_even); // 0 2 4
+// Print all odd (not even) numbers.
+std::copy_if(std::cbegin(v), std::cend(v), ostream_it, std::not_fn(is_even)); // 1 3
+```
+
+### String conversion to/from numbers
+Convert integrals and floats to a string or vice-versa. Conversions are non-throwing, do not allocate, and are more secure than the equivalents from the C standard library.
+
+Users are responsible for allocating enough storage required for `std::to_chars`, or the function will fail by setting the error code object in its return value.
+
+These functions allow you to optionally pass a base (defaults to base-10) or a format specifier for floating type input.
+
+* `std::to_chars` returns a (non-const) char pointer which is one-past-the-end of the string that the function wrote to inside the given buffer, and an error code object.
+* `std::from_chars` returns a const char pointer which on success is equal to the end pointer passed to the function, and an error code object.
+
+Both error code objects returned from these functions are equal to the default-initialized error code object on success.
+
+Convert the number `123` to a `std::string`:
+```c++
+const int n = 123;
+
+// Can use any container, string, array, etc.
+std::string str;
+str.resize(3); // hold enough storage for each digit of `n`
+
+const auto [ ptr, ec ] = std::to_chars(str.data(), str.data() + str.size(), n);
+
+if (ec == std::errc{}) { std::cout << str << std::endl; } // 123
+else { /* handle failure */ }
+```
+
+Convert from a `std::string` with value `"123"` to an integer:
+```c++
+const std::string str{ "123" };
+int n;
+
+const auto [ ptr, ec ] = std::from_chars(str.data(), str.data() + str.size(), n);
+
+if (ec == std::errc{}) { std::cout << n << std::endl; } // 123
+else { /* handle failure */ }
 ```
 
 ## C++14 Language Features
@@ -1617,7 +1800,7 @@ Attributes provide a universal syntax over `__attribute__(...)`, `__declspec`, e
 ```
 
 ### constexpr
-Constant expressions are expressions evaluated by the compiler at compile-time. Only non-complex computations can be carried out in a constant expression. Use the `constexpr` specifier to indicate the variable, function, etc. is a constant expression.
+Constant expressions are expressions that are *possibly* evaluated by the compiler at compile-time. Only non-complex computations can be carried out in a constant expression (these rules are progressively relaxed in later versions). Use the `constexpr` specifier to indicate the variable, function, etc. is a constant expression.
 ```c++
 constexpr int square(int x) {
   return x * x;
@@ -1633,8 +1816,9 @@ int b = square2(2); // mov edi, 2
                     // call square2(int)
                     // mov DWORD PTR [rbp-8], eax
 ```
+In the previous snippet, notice that the computation when calling `square` is carried out at compile-time, and then the result is embedded in the code generation, while `square2` is called at run-time.
 
-`constexpr` values are those that the compiler can evaluate at compile-time:
+`constexpr` values are those that the compiler can evaluate, but are not guaranteed to, at compile-time:
 ```c++
 const int x = 123;
 constexpr const int& y = x; // error -- constexpr variable `y` must be initialized by a constant expression
